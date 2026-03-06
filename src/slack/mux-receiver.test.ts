@@ -417,4 +417,15 @@ describe("config validation", () => {
       expect(muxUrlIssue).toBeDefined();
     }
   });
+
+  test("SlackConfigSchema accepts account mux with inherited base url", async () => {
+    const { SlackConfigSchema } = await import("../config/zod-schema.providers-core.js");
+    const result = SlackConfigSchema.safeParse({
+      mux: { url: "wss://mux.example.com/ws" },
+      accounts: {
+        work: { mode: "mux", mux: { token: "work-token" } },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
 });

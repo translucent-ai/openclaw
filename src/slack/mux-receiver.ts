@@ -81,7 +81,7 @@ export class MuxReceiver {
 
   async start(): Promise<void> {
     this.stopped = false;
-    this.resolvedToken = await this.resolveToken();
+    await this.refreshToken();
     await this.connect();
   }
 
@@ -203,12 +203,14 @@ export class MuxReceiver {
       if (this.stopped) {
         return;
       }
-      this.connect().catch((err) => {
-        this.runtime?.error?.(`slack mux reconnect failed: ${(err as Error).message}`);
-        // The failed connect() won't schedule another reconnect because
-        // everOpened is false for that attempt.  Keep retrying.
-        this.scheduleReconnect();
-      });
+      this.refreshToken()
+        .then(() => this.connect())
+        .catch((err) => {
+          this.runtime?.error?.(`slack mux reconnect failed: ${(err as Error).message}`);
+          // The failed connect() won't schedule another reconnect because
+          // everOpened is false for that attempt.  Keep retrying.
+          this.scheduleReconnect();
+        });
     }, delay);
   }
 
@@ -269,6 +271,12 @@ export class MuxReceiver {
   }
 
   // ── token resolution ───────────────────────────────────────────────
+
+  /** Re-resolve the auth token.  Called on initial start and before each
+   *  reconnect so that expired cached tokens are replaced. */
+  private async refreshToken(): Promise<void> {
+    this.resolvedToken = await this.resolveToken();
+  }
 
   private async resolveToken(): Promise<string | null> {
     const configToken = this.mux.token?.trim();
