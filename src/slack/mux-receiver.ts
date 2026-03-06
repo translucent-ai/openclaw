@@ -202,6 +202,9 @@ export class MuxReceiver {
       }
       this.connect().catch((err) => {
         this.runtime?.error?.(`slack mux reconnect failed: ${(err as Error).message}`);
+        // The failed connect() won't schedule another reconnect because
+        // everOpened is false for that attempt.  Keep retrying.
+        this.scheduleReconnect();
       });
     }, delay);
   }

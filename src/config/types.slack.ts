@@ -80,8 +80,9 @@ export type SlackThreadConfig = {
 };
 
 export type SlackMuxConfig = {
-  /** WebSocket URL of the openclaw-mux service (e.g., wss://openclaw-mux.example.com/ws). */
-  url: string;
+  /** WebSocket URL of the openclaw-mux service (e.g., wss://openclaw-mux.example.com/ws).
+   *  Optional at account level — inherits from channels.slack.mux.url. */
+  url?: string;
   /**
    * MCP server URL for OAuth token cache lookup.  When set, the mux receiver
    * resolves auth tokens from the local mcp-remote token cache keyed by this URL.

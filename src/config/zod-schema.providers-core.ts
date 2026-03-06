@@ -804,7 +804,10 @@ const SlackReplyToModeByChatTypeSchema = z
 
 export const SlackMuxSchema = z
   .object({
-    url: z.string().min(1),
+    // url is optional at the schema level — account-level mux objects can
+    // inherit the URL from the base channels.slack.mux.url via the
+    // SlackConfigSchema superRefine validation.
+    url: z.string().min(1).optional(),
     mcpServerUrl: z.string().optional(),
     token: z.string().optional().register(sensitive),
   })
