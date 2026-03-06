@@ -245,9 +245,15 @@ export class MuxReceiver {
       return;
     }
 
+    // Forward Slack retry metadata so Bolt handlers can detect and deduplicate
+    // retried event deliveries (x-slack-retry-num / x-slack-retry-reason).
+    const retryNumRaw = msg.headers["x-slack-retry-num"];
+    const retryReason = msg.headers["x-slack-retry-reason"];
     const event: ReceiverEvent = {
       body: msg.payload,
       ack: async () => {},
+      ...(retryNumRaw !== undefined ? { retryNum: parseInt(retryNumRaw, 10) } : {}),
+      ...(retryReason !== undefined ? { retryReason } : {}),
     };
     this.app.processEvent(event).catch((err) => {
       this.runtime?.error?.(`slack mux: processEvent error: ${err}`);

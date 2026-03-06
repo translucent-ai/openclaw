@@ -21,7 +21,9 @@ export { inferSlackChannelType, normalizeSlackChannelType } from "./channel-type
 export type SlackMonitorContext = {
   cfg: OpenClawConfig;
   accountId: string;
-  botToken: string;
+  /** Undefined in mux mode when no direct bot token is configured; API calls
+   *  are proxied through the mux WebSocket and do not require a local token. */
+  botToken: string | undefined;
   app: App;
   runtime: RuntimeEnv;
 
@@ -87,7 +89,7 @@ export type SlackMonitorContext = {
 export function createSlackMonitorContext(params: {
   cfg: OpenClawConfig;
   accountId: string;
-  botToken: string;
+  botToken: string | undefined;
   app: App;
   runtime: RuntimeEnv;
 
@@ -210,7 +212,7 @@ export function createSlackMonitorContext(params: {
     }
     try {
       const info = await params.app.client.conversations.info({
-        token: params.botToken,
+        ...(params.botToken ? { token: params.botToken } : {}),
         channel: channelId,
       });
       const name = info.channel && "name" in info.channel ? info.channel.name : undefined;
@@ -242,7 +244,7 @@ export function createSlackMonitorContext(params: {
     }
     try {
       const info = await params.app.client.users.info({
-        token: params.botToken,
+        ...(params.botToken ? { token: params.botToken } : {}),
         user: userId,
       });
       const profile = info.user?.profile;
@@ -264,7 +266,7 @@ export function createSlackMonitorContext(params: {
       return;
     }
     const payload = {
-      token: params.botToken,
+      ...(params.botToken ? { token: params.botToken } : {}),
       channel_id: p.channelId,
       thread_ts: p.threadTs,
       status: p.status,

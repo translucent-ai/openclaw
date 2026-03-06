@@ -229,7 +229,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     await deliverReplies({
       replies: [payload],
       target: prepared.replyTarget,
-      token: ctx.botToken,
+      token: ctx.botToken ?? "",
       accountId: account.accountId,
       runtime,
       textLimit: ctx.textLimit,
@@ -360,7 +360,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
 
   const draftStream = createSlackDraftStream({
     target: prepared.replyTarget,
-    token: ctx.botToken,
+    token: ctx.botToken ?? "",
     accountId: account.accountId,
     maxChars: Math.min(ctx.textLimit, 4000),
     resolveThreadTs: () => {

@@ -294,7 +294,7 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
   const ctx = createSlackMonitorContext({
     cfg,
     accountId: account.accountId,
-    botToken: botToken ?? "",
+    botToken: botToken || undefined,
     app,
     runtime,
     botUserId,
