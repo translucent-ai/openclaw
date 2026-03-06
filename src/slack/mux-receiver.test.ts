@@ -218,6 +218,44 @@ describe("MuxReceiver", () => {
     expect(runtime.log).toHaveBeenCalledWith(expect.stringContaining("reconnecting in"));
   });
 
+  test("rejects in-flight API calls on disconnect", async () => {
+    let serverWs: WebSocket | undefined;
+    wss.on("connection", (ws) => {
+      serverWs = ws;
+    });
+
+    receiver = new MuxReceiver({
+      mux: { url: `ws://127.0.0.1:${port}` },
+      runtime,
+    });
+    receiver.init({ processEvent: vi.fn(), client: { apiCall: vi.fn() } });
+
+    await receiver.start();
+
+    // Start an API call but don't respond from server
+    const apiPromise = receiver.apiCall("chat.postMessage", { channel: "C123", text: "hi" });
+    // Server closes the connection
+    serverWs!.close(1001, "going away");
+
+    await expect(apiPromise).rejects.toThrow("MuxReceiver: WebSocket disconnected");
+  });
+
+  test("does not reconnect on initial connection failure", async () => {
+    // Close the server so the initial connection fails
+    await new Promise<void>((resolve) => wss.close(() => resolve()));
+
+    receiver = new MuxReceiver({
+      mux: { url: `ws://127.0.0.1:${port}` },
+      runtime,
+    });
+    receiver.init({ processEvent: vi.fn(), client: { apiCall: vi.fn() } });
+
+    await expect(receiver.start()).rejects.toThrow();
+    // Give time for any reconnect attempt to fire
+    await new Promise((r) => setTimeout(r, 200));
+    expect(runtime.log).not.toHaveBeenCalledWith(expect.stringContaining("reconnecting in"));
+  });
+
   test("stop cancels pending apiCall promises", async () => {
     wss.on("connection", () => {
       // Server intentionally never responds to API calls.

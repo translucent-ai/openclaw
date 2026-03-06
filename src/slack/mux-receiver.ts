@@ -143,8 +143,10 @@ export class MuxReceiver {
     return new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(url, { headers });
       this.ws = ws;
+      let everOpened = false;
 
       ws.on("open", () => {
+        everOpened = true;
         this.backoffMs = INITIAL_BACKOFF_MS;
         this.runtime?.log?.("slack mux connected");
         resolve();
@@ -158,7 +160,20 @@ export class MuxReceiver {
         const reasonStr = typeof reason === "string" ? reason : String(reason ?? "");
         this.runtime?.log?.(`slack mux disconnected: code=${code} reason=${reasonStr}`);
         this.ws = null;
-        this.scheduleReconnect();
+        // Fail any in-flight API calls immediately rather than letting them
+        // hang for up to API_CALL_TIMEOUT_MS during a disconnect.
+        for (const [id, pending] of this.pending) {
+          clearTimeout(pending.timer);
+          pending.reject(new Error("MuxReceiver: WebSocket disconnected"));
+          this.pending.delete(id);
+        }
+        // Only reconnect after a successful open.  On the very first connection
+        // attempt, error→close fires in sequence — the error handler already
+        // rejected the connect() promise, so starting a background reconnect
+        // loop would leave the receiver in an inconsistent state.
+        if (everOpened) {
+          this.scheduleReconnect();
+        }
       });
 
       ws.on("error", (err) => {
