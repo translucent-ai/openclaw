@@ -19,6 +19,7 @@ import {
 import type { SessionScope } from "../../config/sessions.js";
 import { normalizeResolvedSecretInputString } from "../../config/types.secrets.js";
 import { createConnectedChannelStatusPatch } from "../../gateway/channel-status-patches.js";
+import type { SlackMuxConfig } from "../../config/types.slack.js";
 import { warn } from "../../globals.js";
 import { computeBackoff, sleepWithAbort } from "../../infra/backoff.js";
 import { installRequestBodyLimitGuard } from "../../infra/http-body.js";
@@ -195,7 +196,12 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
   const removeAckAfterReply = cfg.messages?.removeAckAfterReply ?? false;
 
   const muxReceiver =
-    slackMode === "mux" ? new MuxReceiver({ mux: account.config.mux!, runtime }) : null;
+    slackMode === "mux"
+      ? new MuxReceiver({
+          mux: { ...cfg.channels?.slack?.mux, ...account.config.mux } as SlackMuxConfig,
+          runtime,
+        })
+      : null;
   const receiver =
     slackMode === "http"
       ? new HTTPReceiver({
