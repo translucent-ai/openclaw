@@ -7,11 +7,12 @@ import { expectInboundContextContract } from "../../../../test/helpers/inbound-c
 import type { OpenClawConfig } from "../../../config/config.js";
 import { resolveAgentRoute } from "../../../routing/resolve-route.js";
 import { resolveThreadSessionKeys } from "../../../routing/session-key.js";
+import type { RuntimeEnv } from "../../../runtime.js";
 import type { ResolvedSlackAccount } from "../../accounts.js";
 import type { SlackMessageEvent } from "../../types.js";
 import type { SlackMonitorContext } from "../context.js";
+import { createSlackMonitorContext } from "../context.js";
 import { prepareSlackMessage } from "./prepare.js";
-import { createInboundSlackTestContext, createSlackTestAccount } from "./prepare.test-helpers.js";
 
 describe("slack prepareSlackMessage inbound contract", () => {
   let fixtureRoot = "";
@@ -37,7 +38,55 @@ describe("slack prepareSlackMessage inbound contract", () => {
     }
   });
 
-  const createInboundSlackCtx = createInboundSlackTestContext;
+  function createInboundSlackCtx(params: {
+    cfg: OpenClawConfig;
+    appClient?: App["client"];
+    defaultRequireMention?: boolean;
+    replyToMode?: "off" | "all";
+    channelsConfig?: Record<string, { systemPrompt: string }>;
+    botToken?: string | undefined;
+    muxMode?: boolean;
+  }) {
+    return createSlackMonitorContext({
+      cfg: params.cfg,
+      accountId: "default",
+      botToken: params.muxMode ? undefined : (params.botToken ?? "token"),
+      app: { client: params.appClient ?? {} } as App,
+      runtime: {} as RuntimeEnv,
+      botUserId: "B1",
+      teamId: "T1",
+      apiAppId: "A1",
+      historyLimit: 0,
+      sessionScope: "per-sender",
+      mainKey: "main",
+      dmEnabled: true,
+      dmPolicy: "open",
+      allowFrom: [],
+      allowNameMatching: false,
+      groupDmEnabled: true,
+      groupDmChannels: [],
+      defaultRequireMention: params.defaultRequireMention ?? true,
+      channelsConfig: params.channelsConfig,
+      groupPolicy: "open",
+      useAccessGroups: false,
+      reactionMode: "off",
+      reactionAllowlist: [],
+      replyToMode: params.replyToMode ?? "off",
+      threadHistoryScope: "thread",
+      threadInheritParent: false,
+      slashCommand: {
+        enabled: false,
+        name: "openclaw",
+        sessionPrefix: "slack:slash",
+        ephemeral: true,
+      },
+      textLimit: 4000,
+      ackReactionScope: "group-mentions",
+      typingReaction: "",
+      mediaMaxBytes: 1024,
+      removeAckAfterReply: false,
+    });
+  }
 
   function createDefaultSlackCtx() {
     const slackCtx = createInboundSlackCtx({
@@ -68,7 +117,19 @@ describe("slack prepareSlackMessage inbound contract", () => {
     });
   }
 
-  const createSlackAccount = createSlackTestAccount;
+  function createSlackAccount(config: ResolvedSlackAccount["config"] = {}): ResolvedSlackAccount {
+    return {
+      accountId: "default",
+      enabled: true,
+      botTokenSource: "config",
+      appTokenSource: "config",
+      userTokenSource: "none",
+      config,
+      replyToMode: config.replyToMode,
+      replyToModeByChatType: config.replyToModeByChatType,
+      dm: config.dm,
+    };
+  }
 
   function createSlackMessage(overrides: Partial<SlackMessageEvent>): SlackMessageEvent {
     return {
@@ -414,6 +475,62 @@ describe("slack prepareSlackMessage inbound contract", () => {
     expect(prepared).toBeTruthy();
     expect(prepared!.replyToMode).toBe("off");
     expect(prepared!.ctxPayload.MessageThreadId).toBeUndefined();
+  });
+
+  it("skips thread-starter media resolution in mux mode (no botToken)", async () => {
+    // In mux mode the local bot token is absent. Thread-starter files must not be
+    // passed to resolveSlackMedia — private Slack URLs require the bot token for auth
+    // and attempting the download without one silently degrades media-aware prompts.
+    //
+    // Use a distinct channel+thread_ts (CMUX / 900.000) to avoid poisoning the
+    // THREAD_STARTER_CACHE shared between tests.
+    const replies = vi.fn().mockResolvedValueOnce({
+      messages: [
+        {
+          text: "check this file",
+          user: "U2",
+          ts: "900.000",
+          files: [
+            {
+              name: "report.pdf",
+              url_private: "https://files.slack.com/files-pri/T1-F1/report.pdf",
+              url_private_download: "https://files.slack.com/files-pri/T1-F1/download/report.pdf",
+            },
+          ],
+        },
+      ],
+    });
+    const slackCtx = createInboundSlackCtx({
+      cfg: {
+        channels: { slack: { enabled: true, replyToMode: "all", groupPolicy: "open" } },
+      } as OpenClawConfig,
+      appClient: { conversations: { replies } } as App["client"],
+      defaultRequireMention: false,
+      replyToMode: "all",
+      muxMode: true,
+    });
+    slackCtx.resolveUserName = async () => ({ name: "Alice" });
+    slackCtx.resolveChannelName = async () => ({ name: "general", type: "channel" });
+
+    const prepared = await prepareMessageWith(
+      slackCtx,
+      createThreadAccount(),
+      // Distinct channel+thread_ts so the THREAD_STARTER_CACHE entry doesn't
+      // bleed into other tests that also use C123/100.000.
+      createThreadReplyMessage({
+        channel: "CMUX",
+        thread_ts: "900.000",
+        text: "my reply",
+        ts: "901.000",
+      }),
+    );
+
+    expect(prepared).toBeTruthy();
+    // Thread starter text is still captured
+    expect(prepared!.ctxPayload.ThreadStarterBody).toBe("check this file");
+    // But no media paths — resolveSlackMedia must not be called without a bot token
+    expect(prepared!.ctxPayload.MediaPaths).toBeUndefined();
+    expect(prepared!.ctxPayload.MediaPath).toBeUndefined();
   });
 
   it("marks first thread turn and injects thread history for a new thread session", async () => {
