@@ -176,6 +176,73 @@ describe("MuxReceiver", () => {
     );
   });
 
+  test("propagates ack payload back through mux when event has id", async () => {
+    const ackReceived = new Promise<Record<string, unknown>>((resolve) => {
+      wss.on("connection", (ws) => {
+        ws.send(
+          JSON.stringify({
+            type: "slack_event",
+            id: "evt-001",
+            payload: { type: "block_actions", actions: [] },
+            headers: {},
+          }),
+        );
+        ws.on("message", (data) => {
+          const msg = parseWsMessage(data);
+          if (msg.type === "slack_ack") {
+            resolve(msg);
+          }
+        });
+      });
+    });
+
+    const processEvent = vi
+      .fn()
+      .mockImplementation(async (event: { ack: (...args: unknown[]) => Promise<void> }) => {
+        await event.ack({ text: "got it" });
+      });
+
+    receiver = new MuxReceiver({
+      mux: { url: `ws://127.0.0.1:${port}` },
+      runtime,
+    });
+    receiver.init({ processEvent, client: { apiCall: vi.fn() } });
+
+    await receiver.start();
+    const ack = await ackReceived;
+    expect(ack).toMatchObject({ type: "slack_ack", id: "evt-001", payload: { text: "got it" } });
+  });
+
+  test("ack is no-op when event has no id", async () => {
+    const processEvent = vi
+      .fn()
+      .mockImplementation(async (event: { ack: (...args: unknown[]) => Promise<void> }) => {
+        // Should not throw even though there's no event id
+        await event.ack({ text: "irrelevant" });
+      });
+
+    receiver = new MuxReceiver({
+      mux: { url: `ws://127.0.0.1:${port}` },
+      runtime,
+    });
+    receiver.init({ processEvent, client: { apiCall: vi.fn() } });
+
+    wss.on("connection", (ws) => {
+      ws.send(
+        JSON.stringify({
+          type: "slack_event",
+          // No id field — backward-compat no-op path
+          payload: { type: "event_callback", event: { type: "message" } },
+          headers: {},
+        }),
+      );
+    });
+
+    await receiver.start();
+    await vi.waitFor(() => expect(processEvent).toHaveBeenCalledTimes(1));
+    // If we reach here without throwing, the no-op ack worked correctly.
+  });
+
   test("responds to application-level ping with pong", async () => {
     const pongReceived = new Promise<Record<string, unknown>>((resolve) => {
       wss.on("connection", (ws) => {

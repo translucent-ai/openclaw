@@ -24,6 +24,8 @@ export type ReceiverEvent = {
 /** Inbound message from the mux: a forwarded Slack Events API envelope. */
 type MuxSlackEvent = {
   type: "slack_event";
+  /** Optional per-event ID used to route ack payloads back to the mux. */
+  id?: string;
   payload: Record<string, unknown>;
   headers: Record<string, string>;
 };
@@ -246,7 +248,11 @@ export class MuxReceiver {
     this.stopClientPing();
     this.pingTimer = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
+        // Send both protocol-level ping AND application-level ping.
+        // GKE Cloud LB may not count WebSocket control frames (ping/pong)
+        // as traffic for idle timeout — data frames are needed.
         ws.ping();
+        ws.send(JSON.stringify({ type: "ping", ts: Date.now() }));
       }
     }, CLIENT_PING_INTERVAL_MS);
     if (this.pingTimer.unref) {
@@ -302,9 +308,26 @@ export class MuxReceiver {
     // retried event deliveries (x-slack-retry-num / x-slack-retry-reason).
     const retryNumRaw = msg.headers["x-slack-retry-num"];
     const retryReason = msg.headers["x-slack-retry-reason"];
+    const eventId = msg.id;
     const event: ReceiverEvent = {
       body: msg.payload,
-      ack: async () => {},
+      // Propagate ack payload back through the mux so slash-command /
+      // interactive-component handlers that call ack({ options: [...] }) or
+      // ack(responsePayload) can return data to Slack via the mux server.
+      // If no event id was provided (older mux versions), fall back to no-op.
+      ack: async (...args: unknown[]) => {
+        if (!eventId || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        const payload = args.length > 0 ? args[0] : undefined;
+        this.ws.send(
+          JSON.stringify({
+            type: "slack_ack",
+            id: eventId,
+            ...(payload !== undefined ? { payload } : {}),
+          }),
+        );
+      },
       ...(retryNumRaw !== undefined ? { retryNum: parseInt(retryNumRaw, 10) } : {}),
       ...(retryReason !== undefined ? { retryReason } : {}),
     };
