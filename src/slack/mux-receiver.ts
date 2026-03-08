@@ -456,6 +456,16 @@ export class MuxReceiver {
 /**
  * Monkey-patch Bolt's `app.client` to route all Slack Web API calls through the mux.
  * Must be called after the Bolt App is created with a MuxReceiver.
+ *
+ * Bolt's `@slack/web-api` binds convenience methods (e.g. `chat.postMessage`) at
+ * construction time via `self.apiCall.bind(self, method)`.  This captures the
+ * *original* `apiCall` function reference — so simply replacing `app.client.apiCall`
+ * after construction has no effect on convenience methods.
+ *
+ * To work around this, we:
+ *  1. Replace the top-level `apiCall` (catches any direct callers).
+ *  2. Recursively walk every method-group object on the client and replace each
+ *     bound function with a new one that delegates to the proxy.
  */
 export function installMuxApiProxy(
   app: {
@@ -465,10 +475,60 @@ export function installMuxApiProxy(
   },
   receiver: MuxReceiver,
 ): void {
-  app.client.apiCall = async (
+  const proxyApiCall = async (
     method: string,
     options?: Record<string, unknown>,
   ): Promise<unknown> => {
-    return receiver.apiCall(method, options);
+    return receiver.apiCall(method, options ?? {});
   };
+
+  // 1. Patch the top-level apiCall
+  app.client.apiCall = proxyApiCall;
+
+  // 2. Rebind all convenience methods that were captured via .bind() at construction.
+  //    Method groups are plain objects hanging off app.client (e.g. client.chat,
+  //    client.conversations, client.admin, ...).  Some are nested up to 4 levels
+  //    deep (e.g. admin.apps.config.set).
+  const skipKeys = new Set([
+    // Internal / non-API properties that should not be walked
+    "apiCall",
+    "token",
+    "slackApiUrl",
+    "retryConfig",
+    "requestQueue",
+    "tlsConfig",
+    "rejectRateLimitedCalls",
+    "teamId",
+    "logger",
+    "axios",
+    "middleware",
+  ]);
+
+  function rebindGroup(obj: Record<string, unknown>, prefix: string): void {
+    for (const key of Object.keys(obj)) {
+      const value = obj[key];
+      if (typeof value === "function") {
+        const methodName = `${prefix}.${key}`;
+        // Replace bound apiCall with proxy-routed version.
+        // The original bound function had signature: (options?) => apiCall(method, options)
+        // We replicate that, routing through the mux proxy instead.
+        obj[key] = (options?: Record<string, unknown>): Promise<unknown> => {
+          return proxyApiCall(methodName, options);
+        };
+      } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        // Recurse into nested groups (e.g. admin.apps.activities)
+        rebindGroup(value as Record<string, unknown>, `${prefix}.${key}`);
+      }
+    }
+  }
+
+  for (const key of Object.keys(app.client)) {
+    if (skipKeys.has(key)) {
+      continue;
+    }
+    const value = app.client[key];
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      rebindGroup(value as Record<string, unknown>, key);
+    }
+  }
 }

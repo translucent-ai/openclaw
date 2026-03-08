@@ -439,6 +439,93 @@ describe("installMuxApiProxy", () => {
   });
 });
 
+describe("installMuxApiProxy – convenience method rebinding", () => {
+  test("rebinds nested convenience methods to route through mux proxy", async () => {
+    const port = await getAvailablePort();
+    const wss = new WebSocketServer({ port });
+    const runtime = createTestRuntime();
+
+    const receivedMethods: string[] = [];
+    wss.on("connection", (ws) => {
+      ws.on("message", (data) => {
+        const msg = parseWsMessage(data);
+        if (msg.type === "slack_api") {
+          receivedMethods.push(msg.method as string);
+          ws.send(
+            JSON.stringify({
+              type: "slack_api_response",
+              id: msg.id,
+              ok: true,
+              response: { ok: true },
+            }),
+          );
+        }
+      });
+    });
+
+    const receiver = new MuxReceiver({
+      mux: { url: `ws://127.0.0.1:${port}` },
+      runtime,
+    });
+    receiver.init({ processEvent: vi.fn(), client: { apiCall: vi.fn() } });
+
+    // Simulate the structure that Bolt's WebClient creates via bindApiCall:
+    // convenience methods are pre-bound to the original apiCall.
+    const originalApiCall = vi.fn();
+    const fakeApp = {
+      client: {
+        apiCall: originalApiCall,
+        chat: {
+          postMessage: originalApiCall.bind(null, "chat.postMessage"),
+          update: originalApiCall.bind(null, "chat.update"),
+        },
+        conversations: {
+          info: originalApiCall.bind(null, "conversations.info"),
+          history: originalApiCall.bind(null, "conversations.history"),
+        },
+        // Nested group (like admin.apps.config.set)
+        admin: {
+          apps: {
+            config: {
+              set: originalApiCall.bind(null, "admin.apps.config.set"),
+            },
+          },
+        },
+      } as Record<string, unknown> & {
+        apiCall: (...args: unknown[]) => Promise<unknown>;
+      },
+    };
+
+    installMuxApiProxy(fakeApp, receiver);
+    await receiver.start();
+
+    // Call convenience methods — they should route through the mux, NOT the original
+    const client = fakeApp.client as Record<
+      string,
+      Record<string, (...args: unknown[]) => Promise<unknown>>
+    >;
+    await client.chat.postMessage({ channel: "C123", text: "hello" });
+    await client.conversations.info({ channel: "C123" });
+
+    // Nested method
+    const admin = fakeApp.client.admin as Record<
+      string,
+      Record<string, Record<string, (...args: unknown[]) => Promise<unknown>>>
+    >;
+    await admin.apps.config.set({ app_id: "A123" });
+
+    expect(originalApiCall).not.toHaveBeenCalled();
+    expect(receivedMethods).toEqual([
+      "chat.postMessage",
+      "conversations.info",
+      "admin.apps.config.set",
+    ]);
+
+    await receiver.stop();
+    await new Promise<void>((resolve) => wss.close(() => resolve()));
+  });
+});
+
 describe("config validation", () => {
   test("SlackConfigSchema rejects account mux mode without mux.url", async () => {
     const { SlackConfigSchema } = await import("../config/zod-schema.providers-core.js");
