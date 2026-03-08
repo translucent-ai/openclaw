@@ -61,6 +61,9 @@ function getTokenForOperation(
 
 function isSlackAccountConfigured(account: ResolvedSlackAccount): boolean {
   const mode = account.config.mode ?? "socket";
+  if (mode === "mux") {
+    return Boolean(account.config.mux?.url);
+  }
   const hasBotToken = Boolean(account.botToken?.trim());
   if (!hasBotToken) {
     return false;
