@@ -209,6 +209,7 @@ describe("MuxReceiver", () => {
     receiver.init({ processEvent, client: { apiCall: vi.fn() } });
 
     await receiver.start();
+    receiver.setAuthReady();
     const ack = await ackReceived;
     expect(ack).toMatchObject({ type: "slack_ack", id: "evt-001", payload: { text: "got it" } });
   });
@@ -239,6 +240,7 @@ describe("MuxReceiver", () => {
     });
 
     await receiver.start();
+    receiver.setAuthReady();
     await vi.waitFor(() => expect(processEvent).toHaveBeenCalledTimes(1));
     // If we reach here without throwing, the no-op ack worked correctly.
   });
