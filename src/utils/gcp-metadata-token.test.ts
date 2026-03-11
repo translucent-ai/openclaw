@@ -48,8 +48,8 @@ describe("resolveGcpIdentityToken", () => {
         json: () => Promise.resolve({ id_token: "adc-identity-token-123" }),
       }) as typeof fetch;
 
-      const token = await resolveGcpIdentityToken("https://mux.example.com");
-      expect(token).toBe("adc-identity-token-123");
+      const result = await resolveGcpIdentityToken("https://mux.example.com");
+      expect(result).toEqual({ token: "adc-identity-token-123", source: "adc" });
 
       // Verify it hit the OAuth2 endpoint, not metadata
       const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -86,8 +86,8 @@ describe("resolveGcpIdentityToken", () => {
         text: () => Promise.resolve("metadata-token"),
       }) as typeof fetch;
 
-      const token = await resolveGcpIdentityToken("https://mux.example.com");
-      expect(token).toBe("metadata-token");
+      const result = await resolveGcpIdentityToken("https://mux.example.com");
+      expect(result).toEqual({ token: "metadata-token", source: "metadata" });
     });
   });
 
@@ -98,8 +98,8 @@ describe("resolveGcpIdentityToken", () => {
         text: () => Promise.resolve("gcp-oidc-token-123"),
       }) as typeof fetch;
 
-      const token = await resolveGcpIdentityToken("https://mux.example.com");
-      expect(token).toBe("gcp-oidc-token-123");
+      const result = await resolveGcpIdentityToken("https://mux.example.com");
+      expect(result).toEqual({ token: "gcp-oidc-token-123", source: "metadata" });
 
       const [url, opts] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(url).toContain("audience=https%3A%2F%2Fmux.example.com");
