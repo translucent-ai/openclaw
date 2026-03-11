@@ -171,6 +171,18 @@ export class MuxReceiver {
     }
 
     return new Promise<void>((resolve, reject) => {
+      // Close any existing WebSocket before opening a new one to prevent
+      // the mux from seeing two connections from the same entity (which
+      // triggers a supersede → close → reconnect → supersede loop).
+      if (this.ws) {
+        const old = this.ws;
+        this.ws = null;
+        old.removeAllListeners();
+        try {
+          old.close(1000, "reconnecting");
+        } catch {}
+      }
+
       const ws = new WebSocket(url, { headers });
       this.ws = ws;
       let everOpened = false;
