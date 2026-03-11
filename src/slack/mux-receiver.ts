@@ -384,13 +384,13 @@ export class MuxReceiver {
       return envToken;
     }
 
-    // Try GCP metadata server (Workload Identity / KSA-projected token)
+    // Try GCP identity token (ADC → metadata server fallback)
     const muxUrl = this.mux.url;
     if (muxUrl) {
-      const gcpToken = await resolveGcpIdentityToken(audienceFromWsUrl(muxUrl));
-      if (gcpToken) {
-        this.runtime?.log?.("slack mux: resolved GCP identity token (ADC or metadata server)");
-        return gcpToken;
+      const gcpResult = await resolveGcpIdentityToken(audienceFromWsUrl(muxUrl));
+      if (gcpResult) {
+        this.runtime?.log?.(`slack mux: resolved GCP identity token from ${gcpResult.source}`);
+        return gcpResult.token;
       }
     }
 

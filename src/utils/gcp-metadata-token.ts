@@ -17,17 +17,22 @@ import { readFile } from "node:fs/promises";
 export async function resolveGcpIdentityToken(
   audience: string,
   options?: { timeoutMs?: number },
-): Promise<string | null> {
+): Promise<{ token: string; source: "adc" | "metadata" } | null> {
   const timeoutMs = options?.timeoutMs ?? 3_000;
 
   // Try ADC first (local dev with mounted service account key)
   const adcToken = await resolveFromAdc(audience, timeoutMs);
   if (adcToken) {
-    return adcToken;
+    return { token: adcToken, source: "adc" };
   }
 
   // Fall back to metadata server (GKE)
-  return resolveFromMetadata(audience, timeoutMs);
+  const metadataToken = await resolveFromMetadata(audience, timeoutMs);
+  if (metadataToken) {
+    return { token: metadataToken, source: "metadata" };
+  }
+
+  return null;
 }
 
 /**
