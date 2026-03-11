@@ -389,7 +389,7 @@ export class MuxReceiver {
     if (muxUrl) {
       const gcpToken = await resolveGcpIdentityToken(audienceFromWsUrl(muxUrl));
       if (gcpToken) {
-        this.runtime?.log?.("slack mux: resolved GCP identity token from metadata server");
+        this.runtime?.log?.("slack mux: resolved GCP identity token (ADC or metadata server)");
         return gcpToken;
       }
     }
