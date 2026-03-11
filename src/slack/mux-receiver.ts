@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { WebSocket } from "ws";
 import type { SlackMuxConfig } from "../config/types.slack.js";
 import type { RuntimeEnv } from "../runtime.js";
+import { audienceFromWsUrl, resolveGcpIdentityToken } from "../utils/gcp-metadata-token.js";
 
 type BoltApp = {
   processEvent(event: ReceiverEvent): Promise<void>;
@@ -369,6 +370,16 @@ export class MuxReceiver {
     const envToken = process.env.MUX_TOKEN?.trim();
     if (envToken) {
       return envToken;
+    }
+
+    // Try GCP metadata server (Workload Identity / KSA-projected token)
+    const muxUrl = this.mux.url;
+    if (muxUrl) {
+      const gcpToken = await resolveGcpIdentityToken(audienceFromWsUrl(muxUrl));
+      if (gcpToken) {
+        this.runtime?.log?.("slack mux: resolved GCP identity token from metadata server");
+        return gcpToken;
+      }
     }
 
     try {
