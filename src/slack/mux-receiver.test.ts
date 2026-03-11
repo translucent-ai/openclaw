@@ -363,6 +363,117 @@ describe("MuxReceiver", () => {
     expect(await authHeader).toBe("Bearer test-token-123");
   });
 
+  test("resolves GCP metadata token when no config or env token", async () => {
+    const authHeader = new Promise<string | undefined>((resolve) => {
+      wss.on("connection", (_ws, req) => {
+        resolve(req.headers.authorization);
+      });
+    });
+
+    // Mock fetch to simulate GCP metadata server
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockImplementation((url: string, opts: RequestInit) => {
+      if (
+        url.startsWith("http://metadata.google.internal/") &&
+        (opts.headers as Record<string, string>)?.["Metadata-Flavor"] === "Google"
+      ) {
+        return Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve("gcp-oidc-token-789"),
+        });
+      }
+      return originalFetch(url, opts);
+    }) as typeof fetch;
+
+    try {
+      receiver = new MuxReceiver({
+        mux: { url: `ws://127.0.0.1:${port}` },
+        runtime,
+      });
+      receiver.init({ processEvent: vi.fn(), client: { apiCall: vi.fn() } });
+
+      await receiver.start();
+      expect(await authHeader).toBe("Bearer gcp-oidc-token-789");
+
+      // Verify audience was derived from mux URL
+      const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(fetchCall[0]).toContain(`audience=${encodeURIComponent(`http://127.0.0.1:${port}`)}`);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("falls through GCP metadata when server is unavailable", async () => {
+    const authHeader = new Promise<string | undefined>((resolve) => {
+      wss.on("connection", (_ws, req) => {
+        resolve(req.headers.authorization);
+      });
+    });
+
+    // Mock fetch to simulate metadata server timeout/failure
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.startsWith("http://metadata.google.internal/")) {
+        return Promise.reject(new Error("ECONNREFUSED"));
+      }
+      return originalFetch(url);
+    }) as typeof fetch;
+
+    try {
+      receiver = new MuxReceiver({
+        mux: { url: `ws://127.0.0.1:${port}` },
+        runtime,
+      });
+      receiver.init({ processEvent: vi.fn(), client: { apiCall: vi.fn() } });
+
+      await receiver.start();
+      // Should connect without auth (no token resolved)
+      expect(await authHeader).toBeUndefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test("derives correct HTTPS audience from WSS mux URL", async () => {
+    const authHeader = new Promise<string | undefined>((resolve) => {
+      wss.on("connection", (_ws, req) => {
+        resolve(req.headers.authorization);
+      });
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockImplementation((url: string, opts: RequestInit) => {
+      if (
+        url.startsWith("http://metadata.google.internal/") &&
+        (opts.headers as Record<string, string>)?.["Metadata-Flavor"] === "Google"
+      ) {
+        return Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve("gcp-wss-token"),
+        });
+      }
+      return originalFetch(url, opts);
+    }) as typeof fetch;
+
+    try {
+      // Use wss:// URL but connect to local ws:// for the test
+      receiver = new MuxReceiver({
+        mux: { url: `ws://127.0.0.1:${port}/ws` },
+        runtime,
+      });
+      receiver.init({ processEvent: vi.fn(), client: { apiCall: vi.fn() } });
+
+      await receiver.start();
+      expect(await authHeader).toBe("Bearer gcp-wss-token");
+
+      // Verify /ws path was stripped from audience
+      const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(fetchCall[0]).toContain(`audience=${encodeURIComponent(`http://127.0.0.1:${port}`)}`);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test("uses MUX_TOKEN env var when no config token", async () => {
     const authHeader = new Promise<string | undefined>((resolve) => {
       wss.on("connection", (_ws, req) => {
