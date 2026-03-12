@@ -44,7 +44,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BRANCH="chore/upstream-sync-$(date +%Y-%m-%d)"
+          BRANCH="chore/upstream-sync-$(date +%Y-%m-%d)-${{ github.run_id }}"
           HAS_CONFLICTS=false
           git checkout -b "$BRANCH"
 
