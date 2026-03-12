@@ -3,9 +3,9 @@ import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
-import type { SlackMuxConfig } from "../config/types.slack.js";
-import type { RuntimeEnv } from "../runtime.js";
-import { audienceFromWsUrl, resolveGcpIdentityToken } from "../utils/gcp-metadata-token.js";
+import type { SlackMuxConfig } from "../config/types.slack.ts";
+import type { RuntimeEnv } from "../runtime.ts";
+import { audienceFromWsUrl, resolveGcpIdentityToken } from "../utils/gcp-metadata-token.ts";
 
 type BoltApp = {
   processEvent(event: ReceiverEvent): Promise<void>;
