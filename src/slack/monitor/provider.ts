@@ -18,8 +18,8 @@ import {
 } from "../../config/runtime-group-policy.js";
 import type { SessionScope } from "../../config/sessions.js";
 import { normalizeResolvedSecretInputString } from "../../config/types.secrets.js";
-import { createConnectedChannelStatusPatch } from "../../gateway/channel-status-patches.js";
 import type { SlackMuxConfig } from "../../config/types.slack.js";
+import { createConnectedChannelStatusPatch } from "../../gateway/channel-status-patches.js";
 import { warn } from "../../globals.js";
 import { computeBackoff, sleepWithAbort } from "../../infra/backoff.js";
 import { installRequestBodyLimitGuard } from "../../infra/http-body.js";
@@ -32,6 +32,7 @@ import { normalizeSlackWebhookPath, registerSlackHttpHandler } from "../http/ind
 import { MuxReceiver, installMuxApiProxy } from "../mux-receiver.js";
 import { resolveSlackChannelAllowlist } from "../resolve-channels.js";
 import { resolveSlackUserAllowlist } from "../resolve-users.js";
+import { setMuxProxyClient } from "../send.js";
 import { resolveSlackAppToken, resolveSlackBotToken } from "../token.js";
 import { normalizeAllowList } from "./allow-list.js";
 import { resolveSlackSlashCommandConfig } from "./commands.js";
@@ -233,6 +234,9 @@ export async function monitorSlackProvider(opts: MonitorSlackOpts = {}) {
 
   if (muxReceiver) {
     installMuxApiProxy(app as unknown as Parameters<typeof installMuxApiProxy>[0], muxReceiver);
+    // Register the proxied client so sendMessageSlack can use it as a
+    // fallback when no local bot token is available (mux-only configs).
+    setMuxProxyClient(app.client);
   }
   const slackHttpHandler =
     slackMode === "http" && receiver

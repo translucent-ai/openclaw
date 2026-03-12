@@ -13,7 +13,6 @@ import {
   withTrustedEnvProxyGuardedFetchMode,
 } from "../infra/net/fetch-guard.js";
 import { loadWebMedia } from "../web/media.js";
-import type { SlackTokenSource } from "./accounts.js";
 import { resolveSlackAccount } from "./accounts.js";
 import { buildSlackBlocksFallbackText } from "./blocks-fallback.js";
 import { validateSlackBlocksArray } from "./blocks-input.js";
@@ -23,6 +22,27 @@ import { parseSlackTarget } from "./targets.js";
 import { resolveSlackBotToken } from "./token.js";
 
 const SLACK_TEXT_LIMIT = 4000;
+
+// ── Mux client registry ─────────────────────────────────────────────
+// In mux mode the Slack provider installs an API proxy on app.client
+// that routes all Slack API calls through the mux WebSocket.  The
+// outbound plugin layer calls sendMessageSlack without access to
+// app.client, so it would create a new WebClient and bypass the proxy.
+//
+// This registry lets the provider register the proxied client at
+// startup so sendMessageSlack can use it as a fallback when no token
+// is available and no explicit client was passed.
+let _muxClient: WebClient | undefined;
+
+/** Called by the Slack provider after installMuxApiProxy. */
+export function setMuxProxyClient(client: WebClient): void {
+  _muxClient = client;
+}
+
+/** Returns the mux-proxied WebClient, if registered. */
+export function getMuxProxyClient(): WebClient | undefined {
+  return _muxClient;
+}
 const SLACK_UPLOAD_SSRF_POLICY = {
   allowedHostnames: ["*.slack.com", "*.slack-edge.com", "*.slack-files.com"],
   allowRfc2544BenchmarkRange: true,
@@ -135,30 +155,6 @@ export type SlackSendResult = {
   channelId: string;
 };
 
-function resolveToken(params: {
-  explicit?: string;
-  accountId: string;
-  fallbackToken?: string;
-  fallbackSource?: SlackTokenSource;
-}) {
-  const explicit = resolveSlackBotToken(params.explicit);
-  if (explicit) {
-    return explicit;
-  }
-  const fallback = resolveSlackBotToken(params.fallbackToken);
-  if (!fallback) {
-    logVerbose(
-      `slack send: missing bot token for account=${params.accountId} explicit=${Boolean(
-        params.explicit,
-      )} source=${params.fallbackSource ?? "unknown"}`,
-    );
-    throw new Error(
-      `Slack bot token missing for account "${params.accountId}" (set channels.slack.accounts.${params.accountId}.botToken or SLACK_BOT_TOKEN for default).`,
-    );
-  }
-  return fallback;
-}
-
 function parseRecipient(raw: string): SlackRecipient {
   const target = parseSlackTarget(raw);
   if (!target) {
@@ -270,16 +266,23 @@ export async function sendMessageSlack(
   });
   // When a pre-built client is provided (e.g. in mux mode where app.client is
   // the mux proxy), skip token resolution to avoid throwing on an absent token.
-  const client =
-    opts.client ??
-    createSlackWebClient(
-      resolveToken({
-        explicit: opts.token,
-        accountId: account.accountId,
-        fallbackToken: account.botToken,
-        fallbackSource: account.botTokenSource,
-      }),
-    );
+  // Also fall back to the registered mux proxy client when no token is available.
+  let client: WebClient;
+  if (opts.client) {
+    client = opts.client;
+  } else {
+    const explicit = resolveSlackBotToken(opts.token);
+    const fallback = explicit || resolveSlackBotToken(account.botToken);
+    if (fallback) {
+      client = createSlackWebClient(fallback);
+    } else if (_muxClient) {
+      client = _muxClient;
+    } else {
+      throw new Error(
+        `Slack bot token missing for account "${account.accountId}" (set channels.slack.accounts.${account.accountId}.botToken or SLACK_BOT_TOKEN for default).`,
+      );
+    }
+  }
   const recipient = parseRecipient(to);
   const { channelId } = await resolveChannelId(client, recipient);
   if (blocks) {
