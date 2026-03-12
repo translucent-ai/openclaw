@@ -39,10 +39,6 @@ export function setMuxProxyClient(client: WebClient): void {
   _muxClient = client;
 }
 
-/** Returns the mux-proxied WebClient, if registered. */
-export function getMuxProxyClient(): WebClient | undefined {
-  return _muxClient;
-}
 const SLACK_UPLOAD_SSRF_POLICY = {
   allowedHostnames: ["*.slack.com", "*.slack-edge.com", "*.slack-files.com"],
   allowRfc2544BenchmarkRange: true,
