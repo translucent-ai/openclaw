@@ -1,0 +1,98 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "0 12 * * 1" # Every Monday at noon UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/openclaw/openclaw.git
+          git fetch upstream main
+
+      - name: Check for new commits
+        id: check
+        run: |
+          BEHIND=$(git rev-list --count HEAD..upstream/main)
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "Already up to date with upstream"
+          else
+            echo "$BEHIND new commit(s) from upstream"
+          fi
+
+      - name: Create sync branch and PR
+        id: pr
+        if: steps.check.outputs.behind != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="chore/upstream-sync-$(date +%Y-%m-%d)"
+          HAS_CONFLICTS=false
+          git checkout -b "$BRANCH"
+
+          # Merge upstream — if conflicts, the PR will show them
+          if git merge upstream/main --no-edit; then
+            BODY="Syncs ${{ steps.check.outputs.behind }} commit(s) from \`openclaw/openclaw\` main.
+
+          Clean merge — no conflicts."
+          else
+            HAS_CONFLICTS=true
+            # Commit the conflict markers so they're visible in the PR
+            git add -A
+            git commit --no-edit -m "chore: merge upstream (conflicts)" || true
+            BODY="Syncs ${{ steps.check.outputs.behind }} commit(s) from \`openclaw/openclaw\` main.
+
+          ⚠️ **Merge conflicts detected** — resolve before merging."
+          fi
+
+          git push origin "$BRANCH"
+
+          PR_URL=$(gh pr create \
+            --title "chore(upstream): sync openclaw/openclaw $(date +%Y-%m-%d)" \
+            --body "$BODY" \
+            --base main \
+            --head "$BRANCH" \
+            --label "upstream-sync")
+
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "has_conflicts=$HAS_CONFLICTS" >> "$GITHUB_OUTPUT"
+
+      - name: Auto-approve and merge (clean merges only)
+        if: steps.check.outputs.behind != '0'
+        env:
+          GH_TOKEN: ${{ secrets.BOT_APPROVER_PAT }}
+        run: |
+          PR_URL="${{ steps.pr.outputs.pr_url || '' }}"
+          HAS_CONFLICTS="${{ steps.pr.outputs.has_conflicts || '' }}"
+
+          if [ -z "$PR_URL" ]; then
+            echo "No PR created, skipping"
+            exit 0
+          fi
+
+          if [ "$HAS_CONFLICTS" = "true" ]; then
+            echo "Merge conflicts detected — skipping auto-merge, needs manual resolution"
+            exit 0
+          fi
+
+          # Approve with the bot PAT and enable auto-merge
+          gh pr review "$PR_URL" --approve --body "Clean upstream sync — auto-approved. †"
+          gh pr merge "$PR_URL" --auto --merge
