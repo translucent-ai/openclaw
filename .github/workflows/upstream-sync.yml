@@ -5,9 +5,14 @@ on:
     - cron: "0 12 * * 1" # Every Monday at noon UTC
   workflow_dispatch:
 
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 jobs:
   sync:
@@ -64,6 +69,9 @@ jobs:
           fi
 
           git push origin "$BRANCH"
+
+          # Ensure label exists (no-op if already created)
+          gh label create "upstream-sync" --description "Automated upstream sync PR" --color "0E8A16" || true
 
           PR_URL=$(gh pr create \
             --title "chore(upstream): sync openclaw/openclaw $(date +%Y-%m-%d)" \
