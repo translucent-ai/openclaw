@@ -20,7 +20,20 @@ export function createActiveRun(
   };
 }
 
-export function createChatAbortContext(overrides: Record<string, unknown> = {}) {
+interface ChatAbortContext {
+  chatAbortControllers: Map<string, ReturnType<typeof createActiveRun>>;
+  chatRunBuffers: Map<string, string>;
+  chatDeltaSentAt: Map<string, number>;
+  chatAbortedRuns: Map<string, number>;
+  removeChatRun: ReturnType<typeof vi.fn>;
+  agentRunSeq: Map<string, number>;
+  broadcast: ReturnType<typeof vi.fn>;
+  nodeSendToSession: ReturnType<typeof vi.fn>;
+  logGateway: { warn: ReturnType<typeof vi.fn> };
+  dedupe?: { get: ReturnType<typeof vi.fn> };
+}
+
+export function createChatAbortContext(overrides: Record<string, unknown> = {}): ChatAbortContext {
   return {
     chatAbortControllers: new Map(),
     chatRunBuffers: new Map(),
@@ -39,7 +52,7 @@ export function createChatAbortContext(overrides: Record<string, unknown> = {}) 
 
 export async function invokeChatAbortHandler(params: {
   handler: GatewayRequestHandler;
-  context: ReturnType<typeof createChatAbortContext>;
+  context: ChatAbortContext;
   request: { sessionKey: string; runId?: string };
   client?: {
     connId?: string;
@@ -49,7 +62,7 @@ export async function invokeChatAbortHandler(params: {
     };
   } | null;
   respond?: ReturnType<typeof vi.fn>;
-}) {
+}): Promise<ReturnType<typeof vi.fn>> {
   const respond = params.respond ?? vi.fn();
   await params.handler({
     params: params.request,
